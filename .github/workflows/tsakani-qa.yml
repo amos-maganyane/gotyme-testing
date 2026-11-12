@@ -1,0 +1,48 @@
+# Added by Tsakani QA. Runs the tests and sends the results to Tsakani QA, which keeps the history and
+# builds the report. The run proves which repository it is with GitHub's OIDC token for this deployment,
+# so there is no Tsakani secret in the repository to store, leak or rotate.
+name: Tsakani QA
+
+on:
+  pull_request:
+  push:
+    branches: ['main']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: tsakani-qa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: '.'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
+      - name: Install the browser
+        run: npx playwright install --with-deps chromium
+      - name: Run the tests
+        run: npx playwright test --reporter=list,json
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: test-output/results.json
+      - name: Send results to Tsakani QA
+        if: always()
+        # Sending never turns the job red: the tests decide that.
+        continue-on-error: true
+        env:
+          TSAKANI_URL: 'https://d1fila21u78zpk.cloudfront.net'
+          TSAKANI_SUITE_ID: 'a2241b95-0090-4590-9847-693fc30707c5'
+          TSAKANI_ENVIRONMENT: 'tst'
+        run: curl -fsSL "$TSAKANI_URL/ci/tsakani-post-results.mjs" | node --input-type=module -
